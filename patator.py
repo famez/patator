@@ -3717,7 +3717,9 @@ class HTTP_fuzz(TCP_Cache):
     ('timeout_tcp', 'seconds to wait for a TCP handshake [10]'),
     ('timeout', 'seconds to wait for a HTTP response [20]'),
     ('before_urls', 'comma-separated URLs to query before the main request'),
-    ('before_header', 'use a custom header in the before_urls request'),
+    ('before_headers', 'use a custom header in the before_urls request'),
+    ('before_bodies', 'before body data'),
+    ('before_methods', 'before method to use [GET|POST|HEAD|...]'),
     ('before_egrep', 'extract data from the before_urls response to place in the main request'),
     ('after_urls', 'comma-separated URLs to query after the main request'),
     ('max_mem', 'store no more than N bytes of request+response data in memory [-1 (unlimited)]'),
@@ -3762,7 +3764,8 @@ class HTTP_fuzz(TCP_Cache):
   def execute(self, url=None, host=None, port='', scheme='http', path='/', params='', query='', fragment='', body='',
     header='', method='GET', auto_urlencode='1', pathasis='0', user_pass='', auth_type='basic',
     follow='0', max_follow='5', accept_cookie='0', proxy='', proxy_type='http', resolve='', ssl_cert='', timeout_tcp='10', timeout='20', persistent='1',
-    before_urls='', before_header='', before_egrep='', after_urls='', max_mem='-1'):
+    before_urls='', before_headers='', before_egrep='', after_urls='', max_mem='-1',
+    before_methods='', before_bodies=''):
 
     if url:
       scheme, host, path, params, query, fragment = urlparse(url)
@@ -3845,24 +3848,47 @@ class HTTP_fuzz(TCP_Cache):
       # produce requests with more than one Cookie: header
       # and the server will process only one of them (eg. Apache only reads the last one)
 
-    if before_urls:
-      for before_url in before_urls.split(','):
-        self.perform_fp(fp, 'GET', before_url, before_header)
 
-      if before_egrep:
-        for be in before_egrep.split('|'):
-          mark, regex = be.split(':', 1)
-          val = re.search(regex, response.getvalue(), re.M).group(1)
+    if before_urls and before_bodies and before_methods and before_headers:
+      before_urls = before_urls.split(',')
+      before_bodies = before_bodies.split(',')
+      before_methods = before_methods.split(',')
+      before_headers = before_headers.split(',')
+
+      if len(before_urls) == len(before_bodies) and len(before_urls) == len(before_methods) and len(before_urls) == len(before_headers):
+
+        for before_url in before_urls:
+          before_body = before_bodies.pop(0)
+          before_method = before_methods.pop(0)
+          before_header = before_headers.pop(0)
+
+      
 
           if auto_urlencode == '1':
-            val = html_unescape(val)
-            val = quote(val)
+            before_body = urlencode(parse_qsl(before_body, True))
 
-          header = header.replace(mark, val)
-          query = query.replace(mark, val)
-          body = body.replace(mark, val)
+          self.perform_fp(fp, before_method, before_url, before_header, before_body)
 
-      response = StringIO()
+
+          if before_egrep:
+            for be in before_egrep.split('|'):
+              mark, regex = be.split(':', 1)
+              val = re.search(regex, response.getvalue(), re.M).group(1)
+
+              if auto_urlencode == '1':
+                val = html_unescape(val)
+                val = quote(val)
+
+              if not before_bodies:
+                header = header.replace(mark, val)
+                query = query.replace(mark, val)
+                body = body.replace(mark, val)
+              else:
+                before_headers[0] = before_headers[0].replace(mark, val)
+                before_bodies[0] = before_bodies[0].replace(mark, val)
+
+
+              response = StringIO()
 
     if auto_urlencode == '1':
       path = quote(path)
